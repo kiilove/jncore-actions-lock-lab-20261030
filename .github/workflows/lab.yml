@@ -1,0 +1,132 @@
+name: JNCORE lockfile lab
+run-name: "Lab ${{ inputs.mode }} / ${{ github.ref_name }}"
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Synthetic lab operation
+        required: true
+        type: choice
+        options: [test, setup, lock, advance, unlock, missing, relock]
+        default: test
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: inputs.mode != 'test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LAB_REPO: ${{ github.repository }}
+      LAB_MODE: ${{ inputs.mode }}
+    steps:
+      - name: Prepare isolated lab repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$LAB_REPO" = "kiilove/jncore-actions-lock-lab-20261030"
+          gh auth setup-git
+          gh repo clone "$LAB_REPO" lab -- --branch main
+          cd lab
+          git config user.name 'JNCORE Synthetic Lab'
+          git config user.email 'lab@example.invalid'
+          case "$LAB_MODE" in
+            setup)
+              test ! -d parent
+              mkdir -p parent helper
+              python3 - <<'PY'
+          import os
+          from pathlib import Path
+          repo = os.environ['LAB_REPO']
+          Path('parent/action.yml').write_text('name: Parent demo\ndescription: Harmless nested action\nruns:\n  using: composite\n  steps:\n    - uses: '+repo+'/helper@moving\n')
+          Path('helper/action.yml').write_text('name: Helper demo\ndescription: Prints a harmless marker only\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: |\n        echo "JNCORE_MARKER=V1"\n        echo "## Executed helper: V1" >> "$GITHUB_STEP_SUMMARY"\n')
+          PY
+              git add parent helper
+              git commit -m 'lab: harmless parent and V1 helper'
+              git push origin HEAD:source HEAD:moving HEAD:main
+              ;;
+            lock|relock)
+              gh extension install github/gh-actions-lock --pin v0.4.0
+              gh extension list
+              if [ "$LAB_MODE" = relock ]; then
+                gh actions-lock --relock --no-narrow .github/workflows/lab.yml
+              else
+                gh actions-lock --no-narrow .github/workflows/lab.yml
+              fi
+              gh actions-lock --verify
+              cat .github/workflows/actions.lock
+              git add .github/workflows
+              git commit -m "lab: $LAB_MODE action dependencies"
+              git push origin HEAD:main
+              ;;
+            advance)
+              git fetch origin moving
+              git checkout -b moving origin/moving
+              python3 - <<'PY'
+          from pathlib import Path
+          p = Path('helper/action.yml')
+          s = p.read_text()
+          assert 'V1' in s and 'V2' not in s
+          p.write_text(s.replace('V1','V2'))
+          PY
+              git add helper/action.yml
+              git commit -m 'lab: advance helper from V1 to V2'
+              git push origin HEAD:moving
+              ;;
+            unlock)
+              git checkout -b lab-unlocked
+              git rm .github/workflows/actions.lock
+              git commit -m 'lab: unlocked comparison branch only'
+              git push origin HEAD:lab-unlocked
+              ;;
+            missing)
+              git checkout -b lab-missing
+              python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/actions.lock')
+          lines=p.read_text().splitlines(True)
+          found=False
+          dropping=False
+          result=[]
+          for line in lines:
+              if '/helper@moving' in line and line.rstrip().endswith(':'):
+                  found=True
+                  dropping=True
+                  indent=len(line)-len(line.lstrip())
+                  continue
+              if dropping and line.strip() and len(line)-len(line.lstrip())<=indent:
+                  dropping=False
+              if not dropping:
+                  result.append(line)
+          assert found, 'helper dependency entry was not found'
+          p.write_text(''.join(result))
+          PY
+              git add .github/workflows/actions.lock
+              git commit -m 'lab: deliberately omit helper dependency for negative test'
+              git push origin HEAD:lab-missing
+              ;;
+            *) exit 1 ;;
+          esac
+          git log -1 --format='%h %s'
+          echo "## Lab preparation: $LAB_MODE" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Synthetic repository only. No production data or deployment secrets.' >> "$GITHUB_STEP_SUMMARY"
+  observe:
+    if: inputs.mode == 'test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - name: Call fixed parent with moving nested helper
+        uses: kiilove/jncore-actions-lock-lab-20261030/parent@source
+      - name: Record experiment context
+        shell: bash
+        env:
+          LAB_REVISION: ${{ github.sha }}
+          LAB_BRANCH: ${{ github.ref_name }}
+        run: |
+          printf 'Consumer revision: %s\nBranch: %s\n' "$LAB_REVISION" "$LAB_BRANCH"
+          printf '\nConsumer: `%s`\n\nBranch: `%s`\n' "$LAB_REVISION" "$LAB_BRANCH" >> "$GITHUB_STEP_SUMMARY"
