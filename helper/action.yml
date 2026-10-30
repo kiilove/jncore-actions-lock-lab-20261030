@@ -1,0 +1,9 @@
+name: Helper demo
+description: Prints a harmless marker only
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        echo "JNCORE_MARKER=V1"
+        echo "## Executed helper: V1" >> "$GITHUB_STEP_SUMMARY"

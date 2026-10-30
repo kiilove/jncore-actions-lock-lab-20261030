@@ -1,0 +1,6 @@
+name: Parent demo
+description: Harmless nested action
+runs:
+  using: composite
+  steps:
+    - uses: kiilove/jncore-actions-lock-lab-20261030/helper@moving
