@@ -6,11 +6,6 @@ workflows:
     '.github/workflows/lab.yml':
         - 'kiilove/jncore-actions-lock-lab-20261030@source'
 dependencies:
-    'kiilove/jncore-actions-lock-lab-20261030@moving':
-        ref: 'moving'
-        commit: 'sha1-e08fd6bc19f085497b7088438ee4d4d794c2012b'
-        owner_id: 57167512
-        repo_id: 1439178625
     'kiilove/jncore-actions-lock-lab-20261030@source':
         ref: 'source'
         commit: 'sha1-e08fd6bc19f085497b7088438ee4d4d794c2012b'
